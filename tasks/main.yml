@@ -1,0 +1,82 @@
+- name: "Create the {{ inventory_hostname }} container"
+  delegate_to: "{{ physical_host }}"
+  block:
+
+  - name: "Create sanitised container name"
+    set_fact:
+      _container_name: "{{ inventory_hostname | replace('_', '-') }}"
+
+  - name: Ensure bind mount host directories exists
+    file:
+      path: "{{ item['host_directory'] }}"
+      state: "directory"
+    with_items: "{{ lxd_container_default_bind_mounts | union(lxd_container_bind_mounts) }}"
+
+  - name: Create container config in cloud-init format
+    set_fact:
+      input_config: "{{ lookup('template', 'container-config.j2') | from_yaml }}"
+
+  - name: Append new config
+    set_fact:
+      input_config: "{{ input_config|combine(lxd_container_extra_config)  }}"
+    when: lxd_container_extra_config is defined
+
+  - name: Print out our full container configuration
+    debug:
+      var: input_config
+
+  - name: "create container {{ _container_name }}"
+    lxd_container:
+      architecture: x86_64
+      ephemeral: false
+      name: "{{ _container_name }}"
+      state: started
+      source:
+        type: image
+        alias: "{{ lxd_container_image_name }}"
+        #      config: "{{ input_config }}"
+      devices: "{{ input_config }}"
+      profiles: [ "{{ lxd_container_profile }}" ]
+      url: "unix:/var/snap/lxd/common/lxd/unix.socket"
+
+  - name: "Wait for container {{ _container_name }} to start"
+    command: "/snap/bin/lxc exec {{ _container_name }} runlevel"
+    changed_when: false
+    register: runlevel_test
+    until: runlevel_test.stdout.lower().find('unknown') == -1
+    retries: "{{ lxd_container_runlevel_retries }}"
+    delay: "{{ lxd_container_runlevel_delay }}"
+
+  - name: "Wait for cloud-init to finish"
+    command: "/snap/bin/lxc file pull {{ _container_name }}/var/lib/cloud/instances/{{ _container_name }}/boot-finished -"
+    register: cloud_init_finished
+    until: cloud_init_finished.rc == 0
+    retries: "{{ lxd_container_cloud_init_retries }}"
+    delay: "{{ lxd_container_cloud_init_delay }}"
+
+  - name: "Check if cloud-init failed, log search for failed"
+    shell: "/snap/bin/lxc file pull {{ _container_name }}/var/log/cloud-init-output.log - | grep failed"
+    failed_when: cloud_init_log.rc == 0
+    register: cloud_init_log
+
+  rescue:
+    - name: "Show logs from failed box"
+      command: "/snap/bin/lxc info --show-log {{ _container_name }}"
+      register: lxcinfo
+      failed_when: false
+      changed_when: false
+
+    - name: LXC Output
+      debug:
+        var: lxcinfo
+
+    - name: cloud_init failed log match
+      debug:
+        var: cloud_init_log.stdout_lines
+
+    - name: "Delete {{ _container_name }}"
+      lxd_container:
+        name: "{{ _container_name }}"
+        url: "unix:/var/snap/lxd/common/lxd/unix.socket"
+        state: absent
+      when: lxd_container_create_delete_on_fail

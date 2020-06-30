@@ -1,0 +1,24 @@
+
+lxd_container_image_name: local-focal
+lxd_container_profile: default
+
+lxd_container_runlevel_delay: 3
+lxd_container_runlevel_retries: 20
+
+lxd_container_cloud_init_delay: 3
+lxd_container_cloud_init_retries: 20
+
+lxd_container_create_delete_on_fail: true
+
+lxd_container_bind_mounts: []
+
+lxd_container_default_bind_mounts:
+  - host_directory: "/openstack/backup/{{ inventory_hostname }}"
+    container_directory: "/var/backup"
+
+lxd_container_networks_combined: "{{ container_networks | default({}) | combine(container_extra_networks | default({})) | combine(lxd_container_networks) }}"
+
+lxd_container_networks:
+  lxdbr0_address:
+    interface: eth0
+    bridge: lxdbr0

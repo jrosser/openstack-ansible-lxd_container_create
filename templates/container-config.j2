@@ -1,0 +1,13 @@
+{% for key, value in lxd_container_networks_combined.items() %}
+nic-{{ value.interface }}:
+  type: nic
+  nictype: bridged
+  name: {{ value.interface }}
+  parent: {{ value.bridge }}
+{% endfor %}
+{% for mount in (lxd_container_default_bind_mounts + lxd_container_bind_mounts) %}
+disk{{ mount.container_directory | replace('/', '-') }}:
+  type: disk
+  source: {{ mount.host_directory }}
+  path: {{ mount.container_directory }}
+{% endfor %}
